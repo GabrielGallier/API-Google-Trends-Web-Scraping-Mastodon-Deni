@@ -1,18 +1,36 @@
-# Digital Denial Discourse Analysis
+# Denial Discourse in French Digital Space
 
-This repository contains code for an exploratory analysis of denial-related discourse
-using digital traces.
+Exploratory computational sociology project analysing the emergence and diffusion of denial-related discourse in France.
 
-The project combines:
+## Research context
 
-- Google Trends time-series analysis
-- exploratory web scraping of Mastodon discussions
-- computational analysis in R
+This project was developed as a first research contribution to Marc Joly's upcoming book on denial in French public discourse.
 
-This research contributes to Marc Joly's forthcoming book on denial in France.
+It explores the dynamics of denial-related expressions through:
+
+- Google Trends time-series data
+- exploratory scraping of Mastodon posts
+
+## Research questions
+
+- How does the use of the term "déni" evolve in French digital discourse?
+- Are certain expressions (e.g. "déni de démocratie", "déni de justice") associated with specific political events?
+- Can digital traces provide insights into emerging discursive strategies of denial?
 
 ## Methods
-- R
-- Google Trends API
-- Web scraping
-- Time-series analysis
+
+- Google Trends API (`gtrendsR`)
+- time-series visualization
+- exploratory Mastodon scraping
+- R and R Markdown workflow
+
+## Repository structure
+
+- `Deni.R` — data collection and analysis script
+- `Deni.Rmd` — reproducible research document
+- `Deni.html` — rendered analysis report
+
+## Author
+
+Gabriel Gallier  
+ENS Paris-Saclay — Master in Quantitative Sociology and Demography
