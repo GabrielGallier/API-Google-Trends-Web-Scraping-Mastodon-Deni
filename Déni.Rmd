@@ -1,0 +1,1228 @@
+---
+title: "***Projet « Déni » : API Google Trends et Scraping Mastodon***"
+author: "**Gabriel Gallier**"
+date: "09/12/2025"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  message   = FALSE,
+  warning   = FALSE,
+  fig.align = "center"
+)
+```
+# **Introduction**
+
+Ce document présente un projet exploratoire autour du terme **"déni"** et d’expressions associées, à partir de :
+
+-- `l’API` (Application Programming Interface ou « interface de programmation d'application ») **Google Trends** (attention et recherches sur le web) ;
+
+-- le `scraping` de posts publics sur **Mastodon** via les **flux RSS de hashtags**.
+
+**Explications des méthodes**
+
+-- Une `API` est une interface logicielle qui permet de « connecter » un logiciel ou un service à un autre logiciel ou service afin d'échanger des données et des fonctionnalités : 
+
+- Dans notre cas, **l’API Google Trends** nous sert à extraire automatiquement, de façon reproductible, des données normalisées sur l’évolution des recherches liées au mot **“déni”**. 
+
+- Elle permet d’illustrer une **méthode d’accès programmatique propre**.
+
+-- *A contrario*, le `scraping` (ou `web scraping` parfois appelé ***harvesting***, ou en français, ***moissonnage***) est une technique de « récupération et organisation automatisées des données Web » :
+
+- C'est la principale forme de **data mining** et **d'extraction des données** de sites web, via un **script** ou un **programme**.
+
+- Le scraping sert à collecter du texte réel produit par les utilisateurs (posts, commentaires, hashtags) sur des plateformes sans `API` ou avec `API limitée`. 
+
+- Il permet d’étudier les usages **discursifs** du mot “déni”, de construire un corpus, de produire des analyses lexicales.
+
+**Objectifs :**
+
+-- Suivre la diffusion du terme **"déni"** et d’expressions associées :
+
+- **"déni de démocratie"** ;
+
+- **"déni de justice"** ;
+
+- **"déni de réalité"** a été testé mais non retenu en raison de la pauvreté des résultats ;
+
+- **"déni macron"** a été ajouté pour vérifier l’apparition d’occurrences plus directement politisées.
+
+-- Articuler ces dynamiques à une réflexion sociologique sur l’évolution des sensibilités, des normes et des relations, et en particulier sur le **"déni pervers"** comme **forme de violence morale** et **stratégie de domination**.
+
+# **Partie A — API Google Trends**
+## **Packages**
+
+Installation éventuelle (à exécuter une fois, de préférence dans la console)
+
+```{r packages, message=FALSE, warning=FALSE}
+# À exécuter une seule fois dans la console :
+# install.packages("gtrendsR")
+# install.packages(c("dplyr", "tidyr", "ggplot2", "lubridate",
+#                    "tibble", "giscoR", "sf"))
+
+library(gtrendsR)   # accès à l'API Google Trends
+library(dplyr)
+library(tidyr)
+library(ggplot2)    
+library(lubridate)  
+library(tibble)
+library(giscoR)
+library(sf)
+```
+
+## **Rappels méthodologiques (Google Trends)**
+
+-- La variable `hits` est un indice normalisé entre `0 et 100` :
+
+- `100` = **moment où le terme est le plus recherché** dans la période et la zone géographique choisies ;
+
+- les autres valeurs sont **proportionnelles** à ce maximum ;
+
+ --> il ne s’agit **pas** de volumes bruts de requêtes.
+
+-- Normalisation par temps et par espace : chaque **point** est **divisé par le nombre total de requêtes** effectuées dans la même zone et la même période, puis mis à l’échelle `0–100`.
+
+-- **Comparabilité :**
+
+- des mots-clés dans une même requête : **oui** ;
+
+- entre des requêtes séparées : **beaucoup plus délicat**.
+
+-- Valeurs très faibles : Google Trends peut renvoyer `<1` ; on peut les recoder en `0.5` (approximation).
+
+-- Les séries peuvent changer légèrement dans le temps (recalibrages, modifications d’échantillonnage).
+
+-- Google Trends mesure une **attention** (recherche), pas l’usage effectif du mot dans les textes ni les contextes d’énonciation.
+
+-- Aussi, Google Trends propose quelques graphiques et cartes en fonction des recherches. En revanche, notre script R peut aller plus loin dans les **représentations graphiques** et **l'affichage de données** !
+
+## **Paramètres de la requête**
+
+Pour nous assurer que l'on ne rencontre pas de problème avec cette requête de grande ampleur.
+
+### **Mots-clés**
+
+```{r keywords}
+keywords <- c(
+  "déni",
+  "déni de démocratie",
+  "déni de justice",
+  "déni macron"
+)
+```
+
+Ici, nous spécifions quels mots-clés nous intéressent.
+
+### **Zone d'étude : France**
+
+```{r geo}
+geo <- "FR"
+```
+
+On précise bien que nous nous intéressons aux recherches faites depuis la **France**. Alors, il faut bien garder en tête qu'on ne cible **pas la francophonie** mais bien notre **hexagone et régions outre-mer**.
+
+### **Période : de 2004-01-01 à aujourd'hui**
+
+```{r periode}
+timewin <- "2004-01-01 2025-12-10"  # à adapter si besoin
+```
+
+L'intérêt est d'obtenir toutes les données jusqu'aux plus récentes. Toutefois, il sera préférable *in fine* de nous limiter à des années précises, imaginons `2004 -> 2026` à l'avenir.
+
+De fait, nous pourrons alors parler clairement des tendances par années puisque toutes les données possibles y figureront !
+
+**N.B. :** l'API Google Trends commence en **2004**, pas avant.
+
+## **Requête API et mise en forme**
+
+```{r backoff}
+gtrends_with_backoff <- function(keyword = keywords,
+                                 geo = geo,
+                                 time = timewin,
+                                 gprop = "web",
+                                 category = "0",
+                                 hl = "en-US",
+                                 low_search_volume = FALSE,
+                                 cookie_url = "http://trends.google.com/Cookies/NID",
+                                 tz = 0,
+                                 onlyInterest = FALSE,
+                                 retry = 5,
+                                 wait = 5,
+                                 quiet = FALSE,
+                                 attempt = 1) {
+
+  msg <- function(...) {
+    if (!quiet) message(...)
+  }
+
+  if (attempt > retry) {
+    stop("Retries exhausted!")
+  }
+
+  if (attempt == 1) {
+    msg("Downloading data for ", time)
+  } else {
+    msg("Attempt ", attempt, "/", retry)
+  }
+
+  tryCatch(
+    gtrends(
+      keyword = keyword, geo = geo, time = time, gprop = gprop,
+      category = category, hl = hl,
+      low_search_volume = low_search_volume, cookie_url = cookie_url,
+      tz = tz, onlyInterest = onlyInterest
+    ),
+    error = function(e) {
+
+      # Messages selon le type d'erreur
+      if (grepl("== 200 is not TRUE", e$message)) {
+        msg("Server is not accepting requests")
+      } else if (grepl("429", e$message)) {
+        msg("Server response: 429 - too many requests")
+      } else if (grepl("500", e$message)) {
+        msg("Server response: 500 - internal server error")
+      } else {
+        stop(e)
+      }
+
+      t <- attempt * wait
+      msg("Waiting for ", t, " seconds")
+      Sys.sleep(t)
+      msg("Retrying...")
+
+      # Rappel récursif de LA MÊME fonction
+      gtrends_with_backoff(
+        keyword,
+        geo,
+        time,
+        gprop,
+        category,
+        hl,
+        low_search_volume,
+        cookie_url,
+        tz,
+        onlyInterest,
+        retry,
+        wait,
+        quiet,
+        attempt + 1
+      )
+    }
+  )
+}
+```
+
+```{r requete}
+# Si on a déjà un fichier local, on le réutilise
+if (file.exists("gt_raw.rds")) {
+  message("Lecture des données locales gt_raw.rds (pas d'appel à l'API).")
+  gt_raw <- readRDS("gt_raw.rds")
+
+} else {
+
+  message("Pas de fichier local, tentative d'appel à Google Trends...")
+
+  gt_raw <- tryCatch(
+    gtrends_with_backoff(
+      keyword = keywords,
+      geo     = geo,
+      time    = timewin,
+      gprop   = "web",
+      retry   = 10,   
+      wait    = 30    
+    ),
+    error = function(e) {
+      message("Échec de l'appel Google Trends : ", conditionMessage(e))
+      return(NULL)
+    }
+  )
+
+  if (is.null(gt_raw)) {
+    stop("Impossible d'obtenir des données Google Trends (API en erreur persistante).")
+  }
+
+  saveRDS(gt_raw, "gt_raw.rds")
+}
+```
+
+Maintenant que nous avons précisé tous les éléments d'intérêt, on peut faire une **requête** à l'API de Google Trends. À cet égard, bombarder de requêtes une API entraînera des erreurs pour ne pas surcharger ce dernier, il faut donc demander avec **parcimonie**.
+
+```{r tableau_requete}
+cat("### Structure de l'objet gt_raw\n")
+str(gt_raw)
+
+cat("### 1) interest_over_time\n")
+print(head(gt_raw$interest_over_time, 10))
+
+cat("### 2) interest_by_region\n")
+print(head(gt_raw$interest_by_region, 10))
+
+cat("### 3) related_queries\n")
+print(head(gt_raw$related_queries, 10))
+```
+
+Cette commande nous permet de voir les 10 premières lignes de chaque bloc, en plus de la structure de base de notre fichier : `interest_over_time`, `interest_by_region` et `relate_queries`. 
+
+L’objet `gt_raw` contient plusieurs `data.frames`, c'est-à-dire des **tableaux** en lignes et colonnes classiques. Pour l'intérêt dans le temps, ce n'est pas spécialement utile.
+
+Cependant, par région, on peut voir que sur notre période donnée, **l'Île-de-France** se place en **première** avec **100 hits**, suivi de la **Bretagne**, nommée Brittanny (**92 hits**) puis du **Nord-Pas-de-Calais** (**91 hits**).
+
+Surtout, pour les **requêtes associées à la recherche**, la plupart de ces dernières concernent des questions de **maternité**, avec en revanche **"dans le déni"** qui se place en **sixième position** des recherches avec **12 sujets reliés** !
+
+```{r time}
+gt_time <- gt_raw$interest_over_time %>%
+as_tibble() %>%
+mutate(
+date    = as.Date(date),
+keyword = factor(
+keyword,
+levels = keywords,
+labels = c("déni", "déni de démocratie", "déni de justice", "déni macron")
+),
+# convertir les valeurs "<1" en 0.5
+hits_clean = ifelse(grepl("^<", hits), 0.5, hits),
+hits_num   = as.numeric(hits_clean)
+)
+```
+
+On transforme ici la table brute `interest_over_time` renvoyée par Google Trends en un `tibble` propre : on standardise la date, on étiquette les mots-clés et on recode les valeurs `<1` en `0,5` pour obtenir un indice numérique `hits_num`.
+
+Un `tibble` est une version modernisée et plus prévisible du `data.frame` de R pour afficher et manipuler les tableaux de données de façon plus lisible et robuste.
+
+## **Série normalisée par le maximum propre à chaque mot-clé (dynamique relative)**
+
+```{r indice}
+gt_rel <- gt_time %>%
+group_by(keyword) %>%
+mutate(
+max_hits = max(hits_num, na.rm = TRUE),
+hits_rel = ifelse(max_hits > 0, hits_num / max_hits, NA_real_)
+) %>%
+ungroup()
+```
+
+On calcule, pour chaque mot-clé, un indice relatif compris entre `0 et 1` en divisant chaque valeur par le maximum de sa série `max_hits`, ce qui permet de comparer la forme des dynamiques temporelles indépendamment de leur niveau absolu.
+
+## **Moyenne annuelle de l'indice par mot-clé**
+
+```{r moyenne}
+gt_year_mean <- gt_time %>%
+mutate(year = lubridate::year(date)) %>%
+group_by(keyword, year) %>%
+summarise(
+hits_mean = mean(hits_num, na.rm = TRUE),
+.groups   = "drop"
+)
+
+head(gt_year_mean, 10)
+```
+
+On agrège ici la série temporelle en calculant, pour chaque mot-clé et chaque année, la moyenne de l’indice, ce qui permet de comparer **l’intensité annuelle des recherches** plutôt que les fluctuations fines au fil du temps.
+
+**L’évolution annuelle** du mot-clé "déni" montre une **progression nette entre 2005 et 2013**. L’intérêt est d’abord **faible** (8,2 en 2005), puis **augmente régulièrement jusqu’en 2007** avant de se **stabiliser autour de 24 en 2008**. 
+
+À partir de **2009**, la dynamique repart à la **hausse** pour atteindre un premier niveau **élevé** (**31,4**), avec une **légère fluctuation en 2010**. 
+
+**L’intérêt culmine en 2012** (**51,1**), année du **pic**, puis **redescend légèrement** en **2013** tout en restant à un niveau supérieur à celui du milieu des années 2000. L’ensemble traduit une **tendance structurée de montée de l’attention portée au terme**, plutôt qu’un bruit irrégulier.
+
+## **Graphiques temporels**
+### **Évolution temporelle brute (2004–aujourd'hui)**
+
+```{r graphique_temporel}
+p_time <- ggplot(gt_time,
+aes(x = date, y = hits_num, colour = keyword)) +
+geom_line() +
+labs(
+title  = "Recherches Google en France – « déni » et expressions associées (2004–2025)",
+x      = "Date",
+y      = "Indice Google Trends (0–100, recodé)",
+colour = "Mot-clé"
+) +
+theme_minimal()
+
+p_time
+```
+
+Le graphique met en évidence une **forte différence d’ordre de grandeur** entre le mot-clé "déni" et les expressions associées. 
+
+**"Déni" concentre l’essentiel des recherches**, avec une montée progressive entre 2005 et la fin des années 2010, puis un niveau élevé et fluctuant jusqu’en 2022, avant un léger recul récent. Cette **trajectoire** suggère une **installation durable du terme dans l’espace public numérique**.
+
+À l’inverse, **les expressions plus spécifiques** ("déni de démocratie", "déni de justice", "déni macron") **restent marginales sur toute la période** : leurs **indices demeurent proches de zéro**, avec de rares saillances ponctuelles. Cela indique que, si le terme général "déni" circule largement, **ses déclinaisons politiques ou juridiques ne génèrent pas un volume de recherches comparable**.
+
+### **Tendance lissée**
+
+```{r tendance}
+ggplot(gt_time, aes(x = date, y = hits_num, colour = keyword)) +
+geom_point(alpha = 0.2, size = 0.7) +
+geom_smooth(se = FALSE, linewidth = 0.9) +
+labs(
+x      = "Date",
+y      = "Intensité de recherche",
+colour = "Mot-clé",
+title  = "Tendance lissée des recherches Google"
+) +
+theme_minimal(base_size = 12)
+```
+
+Ce graphique lissé permet de mieux apprécier les tendances précédemment observées pour le terme "déni".
+
+### **Évolution par expression (facettes)**
+
+```{r expression}
+ggplot(gt_time, aes(x = date, y = hits_num)) +
+geom_line(linewidth = 0.7) +
+facet_wrap(~ keyword, ncol = 2) +
+labs(
+x        = "Année",
+y        = "Intensité de recherche (indice 0–100)",
+title    = "Évolution des recherches par expression",
+subtitle = "Chaque panneau correspond à un mot-clé"
+) +
+scale_x_date(
+limits      = c(as.Date("2004-01-01"), as.Date("2026-01-01")),
+breaks      = seq(as.Date("2004-01-01"), as.Date("2026-01-01"), by = "2 years"),
+date_labels = "%Y"
+) +
+theme_minimal(base_size = 12) +
+theme(
+strip.text  = element_text(face = "bold"),
+axis.text.x = element_text(angle = 45, hjust = 1)
+)
+```
+
+Cette fois-ci, cette matrice de courbes en graphiques nous permet de bien isoler chacun des mots-clés associés à notre recherche.
+
+### **Dynamique relative (normalisée par le maximum)**
+
+```{r dynamique}
+ggplot(gt_rel, aes(date, hits_rel, colour = keyword)) +
+geom_line(linewidth = 0.8) +
+facet_wrap(~ keyword, ncol = 2) +
+labs(
+x        = "Année",
+y        = "Intensité relative (0–1)",
+title    = "Dynamique relative des recherches par expression",
+subtitle = "Chaque série est normalisée par son maximum propre"
+) +
+scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+theme_minimal() +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**Normalisée par leur maximum**, la série **"déni"** révèle une **dynamique continue et structurée**, avec une **montée puis un plateau avant un léger recul récent**.
+
+Les **autres expressions** montrent uniquement des **pics ponctuels, sans tendance durable**. Seul le terme générique présente donc une évolution stable dans le temps.
+
+### **Intensité moyenne annuelle de « déni »**
+
+```{r moyenne_annuelle}
+gt_year_mean_deni <- gt_year_mean %>%
+filter(keyword == "déni")
+
+ggplot(gt_year_mean_deni, aes(x = factor(year), y = hits_mean)) +
+geom_col(fill = "salmon") +
+labs(
+x     = "Année",
+y     = "Indice moyen",
+title = "Intensité moyenne annuelle des recherches pour « déni »"
+) +
+theme_minimal(base_size = 12) +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**L’indice moyen annuel de "déni" augmente fortement entre 2005 et 2012**, signe d’une montée progressive de l’intérêt. Il se stabilise ensuite à un **niveau élevé jusqu’en 2022**, avant de **diminuer légèrement sur les dernières années**. L’ensemble montre une diffusion durable du terme, suivie d’un recul récent mais modéré.
+
+## **Requêtes associées**
+### **Extraction brute**
+
+```{r extraction_brute}
+rel_q_raw <- gt_raw$related_queries %>%
+as_tibble()
+```
+
+On récupère ici le tableau des requêtes associées renvoyé par Google Trends `related_queries` et on le convertit en `tibble` afin de pouvoir le manipuler plus facilement avec les outils du package `tidyverse`.
+
+### **Mise en forme**
+
+```{r mise_en_forme}
+rel_q <- rel_q_raw %>%
+transmute(
+keyword,
+query = value,
+kind  = category
+) %>%
+filter(!is.na(query), query != "") %>%
+arrange(keyword, kind, query)
+```
+
+On ne garde ici que les **informations utiles** sur les requêtes associées (mot-clé, texte de la requête, type de requête), en renommant les colonnes, en supprimant les entrées vides et en triant le tableau pour faciliter la lecture et l’analyse.
+
+### **Tableau par mot-clé et catégorie**
+
+```{r tableau}
+tab_par_keyword <- rel_q %>%
+group_by(keyword, kind) %>%
+summarise(
+`Requêtes associées` = paste(query, collapse = ", "),
+.groups = "drop"
+)
+
+tab_par_keyword
+```
+
+Le **deuxième volet du tableau**, accessible avec la flèche en haut à droite de celui-ci, permet d'apprécier la plupart des requêtes associées en guise d'illustrations !
+
+## **Intérêt par région**
+
+```{r region}
+reg <- gt_raw$interest_by_region %>%
+as_tibble()
+
+glimpse(reg)
+
+reg_clean <- reg %>%
+mutate(
+keyword = factor(
+keyword,
+levels = keywords,
+labels = c("déni",
+"déni de démocratie",
+"déni de justice",
+"déni macron"
+)
+),
+hits_clean = ifelse(grepl("^<", hits), 0.5, hits),
+hits_num   = as.numeric(hits_clean)
+)
+```
+
+### **Barplot par région pour « déni »**
+
+```{r barplot}
+reg_deni <- reg_clean %>%
+filter(keyword == "déni") %>%
+arrange(hits_num)
+
+ggplot(reg_deni, aes(x = reorder(location, hits_num), y = hits_num)) +
+geom_col() +
+coord_flip() +
+labs(
+x     = "Région",
+y     = "Indice Google Trends (0–100)",
+title = "Intensité des recherches pour « déni » par région"
+) +
+theme_minimal(base_size = 12)
+```
+
+Les **chiffres régionaux** que nous avions appréciés au début se retrouvent désormais ici sous forme de `barplot`.
+
+**L’intensité des recherches pour "déni" varie modérément selon les régions**, mais **l’Île-de-France se distingue nettement par un niveau maximal**, suivie par la **Bretagne**, le **Nord-Pas-de-Calais** et les **Pays de la Loire**.
+
+Les **régions du sud et de l’est** affichent des **valeurs un peu plus faibles**, sans écart majeur.
+
+Globalement, **l’intérêt pour le terme est présent sur l’ensemble du territoire**, avec une **concentration plus marquée** dans les zones les plus **urbanisées** ou **médiatiquement denses**.
+
+### **Carte des anciennes régions**
+
+```{r carte}
+reg_deni_map <- reg %>%
+mutate(
+hits_clean = ifelse(grepl("^<", hits), 0.5, hits),
+hits_num   = as.numeric(hits_clean)
+) %>%
+filter(keyword == keywords[1]) %>%  # keywords[1] = "déni"
+mutate(
+region_fr = case_when(
+location == "Alsace"                     ~ "Alsace",
+location == "Aquitaine"                  ~ "Aquitaine",
+location == "Auvergne"                   ~ "Auvergne",
+location == "Brittany"                   ~ "Bretagne",
+location == "Burgundy"                   ~ "Bourgogne",
+location == "Centre-Val de Loire"        ~ "Centre",
+location == "Champagne-Ardenne"          ~ "Champagne-Ardenne",
+location == "Corsica"                    ~ "Corse",
+location == "Franche-Comté"              ~ "Franche-Comté",
+location == "Île-de-France"              ~ "Île de France",
+location == "Languedoc-Roussillon"       ~ "Languedoc-Roussillon",
+location == "Limousin"                   ~ "Limousin",
+location == "Lorraine"                   ~ "Lorraine",
+location == "Lower Normandy"             ~ "Basse-Normandie",
+location == "Midi-Pyrénées"              ~ "Midi-Pyrénées",
+location == "Nord-Pas-de-Calais"         ~ "Nord - Pas-de-Calais",
+location == "Pays de la Loire"           ~ "Pays de la Loire",
+location == "Picardy"                    ~ "Picardie",
+location == "Poitou-Charentes"           ~ "Poitou-Charentes",
+location == "Provence-Alpes-Côte d'Azur" ~ "Provence-Alpes-Côte d'Azur",
+location == "Rhone-Alpes"                ~ "Rhône-Alpes",
+location == "Upper Normandy"             ~ "Haute-Normandie",
+TRUE                                     ~ location
+)
+) %>%
+select(region_fr, hits_num)
+
+fr_regions_old <- gisco_get_nuts(
+country    = "FR",
+nuts_level = 2,
+year       = 2013,
+resolution = "3"
+) %>%
+filter(!NUTS_NAME %in% c("Guadeloupe", "Martinique", "Guyane",
+"La Réunion", "Mayotte"))
+
+map_data_old <- fr_regions_old %>%
+left_join(reg_deni_map, by = c("NUTS_NAME" = "region_fr"))
+
+ggplot(map_data_old) +
+geom_sf(aes(fill = hits_num), colour = "white", linewidth = 0.2) +
+coord_sf(xlim = c(-5.5, 10), ylim = c(41, 51.5), expand = FALSE) +
+scale_fill_viridis_c(option = "plasma", na.value = "grey90") +
+labs(
+title   = "Intensité des recherches Google pour « déni » par région",
+fill    = "Indice\n(0–100)",
+caption = "Source : Google Trends, France (anciennes régions)"
+) +
+theme_minimal(base_size = 12) +
+theme(
+axis.text  = element_blank(),
+axis.title = element_blank(),
+panel.grid = element_blank(),
+plot.title = element_text(face = "bold")
+)
+```
+
+Un souci rencontré au départ tenait au fait que **certaines régions** étaient **traduites en anglais**, alors que **d'autres demeuraient en français** faute d’équivalent. Ceci pouvait représenter un problème pour l'utilisation de cette carte que j'ai récupéré.
+
+Alors, pour construire cette carte, il a été nécessaire, d'une part, de **renommer celles-ci en français**. D'autre part, le fait que les données datent depuis 2004, il était nécessaire de **reprendre l'ancien découpage des régions** pour que tout fonctionne !
+
+La carte montre une **intensité des recherches pour "déni" globalement élevée dans l’ensemble du pays**, avec un **maximum marqué en Île-de-France**. 
+
+Les **régions de l’ouest et du nord** présentent également des **niveaux forts**, tandis que le **sud et l’est** affichent des **intensités légèrement plus basses**.
+
+## **Pistes d’interprétation (Google Trends)**
+
+-- Comparer les **niveaux moyens** et les **pics** entre "déni" et les syntagmes associés.
+
+-- Relier les pics à des **événements politico-médiatiques** (crises, controverses, scandales).
+
+-- Discuter la montée du "déni" comme forme de gestion de la **dissonance entre savoirs scientifiques** et **intérêts dominants**.
+
+-- Garder à l’esprit la nature **relative** et **normalisée** de l’indice `hits_num`.
+
+-- Croiser ces **tendances macro** avec les **usages concrets** observés sur Mastodon, pour articuler **cycles d’attention globale** et **configurations discursives locales**.
+
+
+# **Partie B — Scraping Mastodon**
+## **Packages**
+
+Installation éventuelle (à exécuter une fois dans la console)
+
+```{r packages_scraping_install, eval=FALSE}
+# À lancer une seule fois dans la console :
+# install.packages(c("xml2", "stringr", "purrr", "tibble",
+#   "lubridate", "dplyr", "tidyr", "ggplot2", "anytime",
+#   "tidytext", "stopwords", "ggraph", "igraph"))
+```
+
+Commençons par charger nos packages.
+
+```{r library_scraping, message=FALSE, warning=FALSE}
+library(xml2)
+library(stringr)
+library(purrr)
+library(tibble)
+library(lubridate)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(anytime)
+library(tidytext)
+library(stopwords)
+library(ggraph)
+library(igraph)
+```
+
+## **Méthodologie du scraping**
+
+-- Utiliser les **flux RSS associés aux hashtags Mastodon** (par exemple https://mastodon.social/tags/introduction.rss).
+
+- Le **flux RSS** permet notamment d'afficher sur un site des informations issues d'un autre site tout en conservant sa propre mise en page et sa propre charte graphique (on parle de publication en marque blanche). 
+
+- `RSS` est un acronyme pour *Rich Site Summary* ou pour *Really Simple Syndication* (syndication vraiment simple).
+
+-- **Parser ce flux XML pour récupérer :**
+
+- la **date de publication** ;
+
+- le **texte du post** (description).
+
+**Définitions :**
+
+-- Un **flux XML** est un document structuré qui utilise le langage `XML` (Extensible Markup Language) pour organiser et transmettre des données.
+
+-- `Parser` veut dire « analyser automatiquement une chaîne de texte structurée pour en extraire les éléments utiles dans un format structuré ».
+
+-- Travailler sur un hashtag sans accent (`deni`), puis filtrer dans les textes pour les expressions d’intérêt.
+
+On reste sur de petits volumes (quelques centaines de posts), ce qui limite la charge sur le serveur. Pour une collecte massive, il faudrait **l’API officielle et/ou un accord explicite**.
+
+## **Fonction de scraping du flux RSS**
+
+```{r flux_rss}
+get_mastodon_hashtag_rss <- function(tag,
+                                     instance = "mastodon.social",
+                                     max_items = Inf) {
+
+  # URL du flux
+  rss_url <- paste0(
+    "https://",
+    instance,
+    "/tags/",
+    URLencode(tag, reserved = TRUE),
+    ".rss"
+  )
+
+  message("Lecture du flux RSS : ", rss_url)
+
+  # Lecture XML
+  feed  <- read_xml(rss_url)
+
+  # Items
+  items <- xml_find_all(feed, "//item")
+  if (!is.infinite(max_items)) {
+    items <- items[seq_len(min(length(items), max_items))]
+  }
+
+  # Extraction : titre, date brute, description HTML
+  titles <- items %>%
+    xml_find_first("title") %>%
+    xml_text()
+
+  pubdates_raw <- items %>%
+    xml_find_first("pubDate") %>%
+    xml_text()
+
+  # Parsing robuste des dates avec anytime
+  pubdates <- suppressWarnings(
+    anytime(pubdates_raw, tz = "UTC")
+  )
+
+  descr_html <- items %>%
+    xml_find_first("description") %>%
+    xml_text()
+
+  # Nettoyage du HTML
+  descr_text <- descr_html %>%
+    gsub("<.*?>", " ", .) %>%
+    gsub("\\s+", " ", .) %>%
+    str_trim()
+
+
+  # Tibble final
+  tibble(
+    instance      = instance,
+    hashtag       = tag,
+    title         = titles,
+    pubdate_utc   = pubdates,
+    content_text  = descr_text,
+    pubdate_raw   = pubdates_raw
+  )
+}
+```
+D'abord, on définit  une fonction `get_mastodon_hashtag_rss()` qui, pour un hashtag donné (`tag`) et une instance Mastodon (par défaut `mastodon.social`), **télécharge et prépare le flux RSS correspondant**, avec la possibilité de limiter le nombre de posts récupérés via `max_items`.
+
+Ensuite, on construit `l’URL` du flux RSS du hashtag (en concaténant l’instance et le `tag`, encodé proprement avec `URLencode`), puis on affiche cette `URL` avec `message()` pour garder une trace de ce qui est téléchargé.
+
+La **concaténation**, c’est le fait de coller plusieurs morceaux de texte les uns à la suite des autres pour former une seule chaîne.
+
+Maintenant, on télécharge  le contenu du flux RSS à l’URL construite et on le charge comme `document XML` dans l’objet `feed`, ce qui permettra ensuite d’en extraire les différentes balises (items, titre, date, description, etc.).
+
+On récupère ici toutes les balises `<item>` du flux RSS, chacune correspondant à un post, puis on limite éventuellement le nombre d’items conservés à `max_items` si ce paramètre est fixé (par exemple `100` au lieu de tous les posts disponibles).
+
+Puis, on convertit les dates brutes `pubdates_raw` en véritables objets `date-temps` avec `anytime()`, puis on récupère pour chaque item le contenu `HTML` de la balise `<description>` dans l’objet `descr_html`.
+
+On transforme ici le contenu `HTML` en **texte brut lisible** : on enlève d’abord toutes les balises (`<...>`), puis on compacte les espaces multiples en un seul et on supprime les espaces en début et fin de chaîne avec `str_trim()`.
+
+Enfin, on regroupe toutes les informations extraites (instance, hashtag, titre, dates brute et convertie, texte nettoyé) dans un même tableau au format `tibble`, avec une ligne par post, que la fonction renvoie ensuite comme résultat.
+
+## **Scraping du hashtag #deni**
+
+```{r hashtag}
+hashtags <- c("deni")
+
+deni_posts <- map_dfr(
+hashtags,
+~ get_mastodon_hashtag_rss(
+tag       = .x,
+instance  = "mastodon.social",
+max_items = 500   # limite raisonnable
+)
+)
+```
+On applique ici la fonction de scraping au hashtag "deni" (avec `map_dfr` pour éventuellement gérer plusieurs hashtags) en limitant la collecte à **500 posts**.
+
+### **Nombre total de posts**
+
+```{r total_posts}
+cat("Nombre total de posts récupérés :", nrow(deni_posts), "\n\n")
+```
+
+### **Premières dates brutes**
+
+```{r dates_brutes}
+cat("Premières dates brutes (pubdate_raw) :\n")
+print(head(deni_posts$pubdate_raw, 10))
+```
+
+### **Premières dates converties**
+
+```{r dates_converties}
+cat("Premières dates converties (pubdate_utc) :\n")
+print(head(deni_posts$pubdate_utc, 10))
+```
+
+### **Premiers contenus textuels**
+
+```{r contenus_textuels}
+cat("Premiers contenus textuels (content_text) :\n")
+print(head(deni_posts$content_text, 10))
+```
+
+On peut lire les **contenus textuels**, mais leur mise en page laisse encore à désirer pour les parcourir avec aisance.
+
+### **Tableau des 10 premiers posts complets**
+
+```{r dix_posts}
+deni_posts_head <- head(deni_posts, 10)
+deni_posts_head
+```
+
+En cliquant sur les flèches en haut à droite, on peut parcourir facilement le tableau !
+
+Ces dix premiers posts montrent que :
+
+- "déni" est un **terme polysémique**, traversant plusieurs registres (politique, militant, psychologique, moral).
+
+- Il sert fréquemment de **cadre d’accusation**, visant un adversaire idéologique ou un acteur institutionnel.
+
+- Il peut être utilisé comme **concept explicatif** dans des discussions plus réflexives ou culturelles.
+
+- Le hashtag #deni agrège également du **bruit lexical**, rappelant que les données issues de réseaux sociaux nécessitent un travail systématique de filtrage.
+
+Cette courte fenêtre suffit à illustrer la pertinence d’un protocole de scraping pour analyser les **régimes de signification** attachés au terme "déni", ainsi que la nécessité d’outils lexicaux pour distinguer les formes pertinentes de celles qui relèvent du bruit.
+
+## **Indicateurs de forme de "déni"**
+
+```{r minuscules}
+deni_posts <- deni_posts %>%
+mutate(
+content_low = tolower(content_text),
+
+has_deni_simple =
+  str_detect(content_low, "déni") |
+  str_detect(content_low, "deni"),
+
+has_deni_democratie =
+  str_detect(content_low, "déni de démocratie") |
+  str_detect(content_low, "deni de democratie"),
+
+has_deni_justice =
+  str_detect(content_low, "déni de justice") |
+  str_detect(content_low, "deni de justice"),
+
+has_deni_macron =
+  str_detect(content_low, "déni macron") |
+  str_detect(content_low, "deni macron")
+
+
+)
+```
+
+Ici, on essaye de rendre compte des variations possibles avec ou sans accent de "déni" et en minuscules.
+
+```{r posts}
+deni_posts %>%
+select(pubdate_utc, content_text,
+has_deni_simple,
+has_deni_democratie,
+has_deni_justice,
+has_deni_macron) %>%
+head()
+```
+
+En défilant le tableau avec les flèches, nous obtenons plusieurs informations.
+
+On enrichit ici la table `deni_posts` en créant des indicateurs **booléens** (`has_deni_simple`, `has_deni_democratie`, etc.) qui signalent, dans le texte mis en minuscules, la présence des différentes formes de "déni" que l’on souhaite suivre.
+
+La sélection finale avec `head()` permet de vérifier sur quelques lignes que ces variables ont bien été détectées et codées.
+
+Un indicateur **booléen** (ou variable booléenne) est une variable qui ne prend que deux valeurs possibles, en général `TRUE` ou `FALSE` en R, pour signaler la présence ou l’absence d’une caractéristique (ici : le texte contient ou non telle forme de "déni").
+
+```{r tibble_comptes}
+
+tibble(
+Forme = c(
+"déni (toutes formes)",
+"déni de démocratie",
+"déni de justice",
+"déni macron"
+),
+Nombre = c(
+sum(deni_posts$has_deni_simple, na.rm = TRUE),
+sum(deni_posts$has_deni_democratie, na.rm = TRUE),
+sum(deni_posts$has_deni_justice, na.rm = TRUE),
+sum(deni_posts$has_deni_macron, na.rm = TRUE)
+)
+)
+```
+
+Sur les **20 posts #deni collectés entre juillet et novembre 2025**, **19** contiennent le mot “déni”, mais aucune occurrence explicite des syntagmes “déni de démocratie”, “déni de justice” ou “déni macron”.
+
+## **Variables temporelles et agrégation mensuelle**
+
+```{r temps_mois}
+deni_posts <- deni_posts %>%
+mutate(
+pubdate_paris = with_tz(pubdate_utc, tzone = "Europe/Paris"),
+date          = as.Date(pubdate_paris),
+month         = floor_date(date, unit = "month")
+)
+
+deni_month <- deni_posts %>%
+filter(!is.na(month)) %>%
+group_by(month) %>%
+summarise(
+n_posts        = n(),
+n_deni_simple  = sum(has_deni_simple,     na.rm = TRUE),
+n_deni_demo    = sum(has_deni_democratie, na.rm = TRUE),
+n_deni_justice = sum(has_deni_justice,    na.rm = TRUE),
+n_deni_macron  = sum(has_deni_macron,     na.rm = TRUE),
+.groups        = "drop"
+)
+
+deni_month
+```
+
+On constate bien qu'en effet, les seuls posts ne concernent que le "déni" simple, et que le **pic de posts est survenu durant le mois d'août**.
+
+### **Volume mensuel de posts #deni**
+
+```{r volume_mensuel}
+p_masto_month <- deni_month %>%
+filter(!is.na(month)) %>%
+ggplot(aes(x = month, y = n_posts)) +
+geom_col(fill = "grey40", width = 25) +
+geom_text(aes(label = n_posts),
+vjust = -0.3, size = 4) +
+scale_x_date(
+date_labels = "%b\n%Y",
+date_breaks = "1 month"
+) +
+expand_limits(y = max(deni_month$n_posts, na.rm = TRUE) + 1) +
+labs(
+x        = "Mois",
+y        = "Nombre de posts (#deni)",
+title    = "Volume mensuel de posts Mastodon contenant le hashtag #deni",
+subtitle = "Instance mastodon.social – données issues du flux RSS du hashtag"
+) +
+theme_minimal(base_size = 12) +
+theme(
+axis.text.x   = element_text(angle = 45, hjust = 1),
+plot.title    = element_text(face = "bold", size = 14),
+plot.subtitle = element_text(size = 11)
+)
+
+p_masto_month
+```
+
+Ce pic reste toutefois observé sur un **volume très restreint** (20 posts au total sur 5 mois), ce qui limite fortement la portée des généralisations.
+
+## **Posts illustratifs**
+
+```{r illustrations}
+deni_labeled <- deni_posts %>%
+mutate(
+expression = case_when(
+has_deni_democratie ~ "déni de démocratie",
+has_deni_justice    ~ "déni de justice",
+has_deni_macron     ~ "déni macron",
+has_deni_simple     ~ "déni (toutes formes)",
+TRUE                ~ NA_character_
+)
+) %>%
+filter(!is.na(expression))
+
+posts_illustratifs <- deni_labeled %>%
+arrange(desc(pubdate_paris)) %>%
+slice_head(n = 15) %>%
+select(pubdate_paris, expression, content_text)
+
+posts_illustratifs
+```
+
+Ici, nous voyons mieux les illustrations des posts et leur contenu.
+
+## **Mise en forme longue et graphiques**
+
+```{r month_long}
+deni_month_long <- deni_month %>%
+mutate(month = as.Date(month)) %>%
+filter(!is.na(month)) %>%
+select(
+month,
+n_deni_simple,
+n_deni_demo,
+n_deni_justice,
+n_deni_macron
+) %>%
+pivot_longer(
+cols      = -month,
+names_to  = "expression",
+values_to = "n"
+) %>%
+mutate(
+expression = recode(
+expression,
+n_deni_simple  = "déni (toutes formes)",
+n_deni_demo    = "« déni de démocratie »",
+n_deni_justice = "« déni de justice »",
+n_deni_macron  = "« déni macron »"
+)
+) %>%
+filter(!is.na(n))
+```
+
+Ce code servira pour plus tard.
+
+### **Répartition globale des formes de "déni"**
+
+```{r repartition_formes}
+deni_totaux <- deni_month_long %>%
+group_by(expression) %>%
+summarise(
+n_total = sum(n, na.rm = TRUE),
+.groups = "drop"
+)
+
+ggplot(deni_totaux, aes(x = n_total, y = reorder(expression, n_total))) +
+geom_point(size = 4, colour = "#444444") +
+geom_text(aes(label = n_total), nudge_x = 0.5, size = 4) +
+labs(
+x     = "Nombre de posts",
+y     = "",
+title = "Présence des différentes formes de « déni » dans les posts Mastodon",
+subtitle = "Hashtag #deni sur mastodon.social"
+) +
+theme_minimal(base_size = 12)
+```
+
+Autre manière plus située de représenter la répartition en occurrences précises.
+
+## **Analyse lexicale : co-occurrences et bigrammes**
+### **Mots les plus fréquents autour de "déni"**
+
+```{r mots_frequence}
+# Stopwords FR
+
+sw_fr <- stopwords("fr")
+
+# Stopwords techniques / bruit
+
+stop_extra <- c(
+"https", "http", "www", "com", "net", "fr",
+"amp", "nbsp", "t", "co",
+"trailblazers", "blazers", "portlandtrailblazers",
+"pdh", "deni", "c'est", "d'"
+)
+
+mots_freq_clean <- deni_posts %>%
+transmute(text = tolower(content_text)) %>%
+unnest_tokens(word, text, token = "words") %>%
+filter(
+!word %in% sw_fr,
+!word %in% stop_extra,
+!str_detect(word, "^https?"),
+!str_detect(word, "[0-9]"),
+nchar(word) > 2,
+str_detect(word, "[[:alpha:]]")
+) %>%
+count(word, sort = TRUE)
+
+head(mots_freq_clean, 20)
+
+mots_top10_no_deni <- mots_freq_clean %>%
+filter(!word %in% c("dén", "deni", "déni")) %>%
+slice_max(n, n = 10)
+
+ggplot(mots_top10_no_deni, aes(x = reorder(word, n), y = n)) +
+geom_col(fill = "#284B63") +
+coord_flip() +
+labs(
+x        = "Mot",
+y        = "Fréquence",
+title    = "Co-occurrences les plus fréquentes autour de « déni »",
+subtitle = "Stopwords + bruit retirés – mastodon.social (juil.–nov. 2025)"
+) +
+theme_minimal(base_size = 13) +
+theme(
+plot.title = element_text(face = "bold"),
+axis.text.y = element_text(size = 12)
+)
+```
+À l'aide de ce tableau, on peut voir que les mots les plus fréquents autour de "déni" sur l'échantillon temporel observé est **bouteldja** (`7 occurences`), suivis d'**akadem** et **inceste** *ex aequo* (`5 occurences`).
+
+### **Bigrammes : les plus fréquents**
+
+```{r bigramme}
+bigrams_deni <- deni_posts %>%
+transmute(text = tolower(content_text)) %>%
+unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+separate(bigram, into = c("word1", "word2"), sep = " ") %>%
+filter(
+!word1 %in% sw_fr,
+!word2 %in% sw_fr,
+!word1 %in% stop_extra,
+!word2 %in% stop_extra,
+!str_detect(word1, "^https?"),
+!str_detect(word2, "^https?"),
+!str_detect(word1, "[0-9]"),
+!str_detect(word2, "[0-9]"),
+nchar(word1) > 2,
+nchar(word2) > 2
+) %>%
+filter(
+word1 %in% c("déni", "deni") | word2 %in% c("déni", "deni")
+) %>%
+mutate(bigram = paste(word1, word2)) %>%
+count(bigram, sort = TRUE)
+
+bigrams_top10 <- bigrams_deni %>%
+slice_max(n, n = 10) %>%
+arrange(n)
+
+ggplot(bigrams_top10,
+aes(x = n, y = reorder(bigram, n))) +
+geom_col(fill = "#284B63") +
+labs(
+title    = "Bigrammes les plus fréquents autour de « déni »",
+subtitle = "Hashtag #deni sur mastodon.social (juil.–nov. 2025)",
+x        = "Fréquence",
+y        = "Bigramme"
+) +
+theme_minimal(base_size = 13) +
+theme(
+plot.title    = element_text(face = "bold", size = 16),
+plot.subtitle = element_text(size = 11),
+axis.text.y   = element_text(size = 11)
+)
+```
+
+L'intérêt de ce bigramme à l'avenir pourra nous permettre de représenter les **thématiques associées** aux posts, plutôt que des mots très précis. 
+
+On remarque alors ici que les sujets les plus prolifiques sont `parentalité déni`, `déni inceste`,  `déni bouteldja` et `censure déni`.
+
+Cependant, il sera préférable de créer nos propres catégories bien distinctes pour trier ces différents thèmes, celles-ci n'étant pas spécialement pertinentes sur un si petit échantillon.
+
+### **Réseau de co-occurrences autour de "déni"**
+
+```{r reseau_co_occurrences}
+bigrams_deni_net <- deni_posts %>%
+transmute(text = tolower(content_text)) %>%
+unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+separate(bigram, into = c("w1", "w2"), sep = " ") %>%
+filter(!is.na(w1), !is.na(w2)) %>%
+filter(w1 %in% c("déni", "deni") | w2 %in% c("déni", "deni"))
+
+bigrams_edges <- bigrams_deni_net %>%
+mutate(
+source = "déni",
+target = if_else(w1 %in% c("déni", "deni"), w2, w1)
+)
+
+bigrams_edges_clean <- bigrams_edges %>%
+filter(
+!target %in% sw_fr,
+!target %in% stop_extra,
+!str_detect(target, "^https?"),
+!str_detect(target, "[0-9]"),
+nchar(target) > 2,
+str_detect(target, "[[:alpha:]]")
+)
+
+edges_counts <- bigrams_edges_clean %>%
+count(source, target, sort = TRUE)
+
+edges_top <- edges_counts %>%
+filter(n >= 2)
+if (nrow(edges_top) == 0) {
+edges_top <- edges_counts %>% slice_max(n, n = 10)
+}
+
+g_deni <- graph_from_data_frame(
+edges_top %>% rename(weight = n),
+directed = FALSE
+)
+
+V(g_deni)$degree <- igraph::degree(g_deni)
+
+set.seed(123)
+
+ggraph(g_deni, layout = "fr") +
+geom_edge_link(aes(width = weight),
+colour = "grey60", alpha = 0.7,
+show.legend = FALSE) +
+geom_node_point(aes(size = degree),
+colour = "black", fill = "white",
+shape = 21, stroke = 0.5,
+show.legend = FALSE) +
+geom_node_text(aes(label = name),
+repel = TRUE,
+size = 4,
+family = "sans") +
+scale_edge_width(range = c(0.4, 2.2)) +
+scale_size(range = c(3, 8)) +
+labs(
+title    = "Réseau de co-occurrences autour de « déni »",
+subtitle = "Bigrammes issus des posts avec le hashtag #deni sur mastodon.social (juil.–nov. 2025)",
+x        = NULL,
+y        = NULL
+) +
+theme_void(base_size = 12) +
+theme(
+plot.title    = element_text(face = "bold", size = 16),
+plot.subtitle = element_text(size = 11)
+)
+```
+
+La construction de ce **réseau** nous offre un cadre de représentation graphique très intéressant.
+
+*De facto*, la plupart des enquêtes du Politoscope (https://politoscope.org), notamment des travaux David Chavalarias, se servent des **analyses de réseaux** à très grande échelle et avec de grands volumes de données de réseaux sociaux numériques pour représenter des **tendances**.
+
+À la différence des analyses du Politoscope, qui reposent sur des millions de *tweets*, le graphe présenté ici a surtout une fonction illustrative sur un corpus minuscule.
+
+Répliquer ces méthodes sur notre sujet d'étude serait **très** pertinent.
+
+# **Conclusion**
+
+-- **Google Trends** fournit un **indicateur macro d’attention** pour **"déni"** et des expressions associées, sur une longue période (**2004–aujourd'hui**), avec une granularité temporelle relativement fine.
+
+-- Le **scraping Mastodon par flux RSS** donne un **matériau plus micro** :
+
+- posts publics récents portant explicitement le hashtag #deni sur une instance donnée ;
+
+- analyse lexicale, co-occurrences, bigrammes et graphes de réseau.
+
+-- Les deux approches sont **complémentaires** :
+
+- **macro-structures d’attention** et **cycles politico-médiatiques** ;
+
+- usages concrets, situés, et configurations discursives autour du « déni ».
+
+-- Ces éléments peuvent ensuite être relus à partir d’un cadre théorique sur le **déni** (classique vs pervers), les rapports de classe, l’insécurité ontologique et les formes contemporaines de violence morale.
