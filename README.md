@@ -24,6 +24,16 @@ It explores the dynamics of denial-related expressions through:
 - exploratory Mastodon scraping
 - R and R Markdown workflow
 
+## Example results
+
+### Google Trends evolution of denial discourse in France
+
+![Google Trends](Graph.png)
+
+### Geographic distribution of denial-related searches
+
+![France Map](Map.png)
+
 ## Repository structure
 
 - `Deni.R` — data collection and analysis script
