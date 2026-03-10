@@ -1,2 +1,0 @@
-ggsave("figures/google_trends_deni.png", width = 10, height = 6)
-ggsave("figures/carte_france_deni.png", width = 8, height = 8)
