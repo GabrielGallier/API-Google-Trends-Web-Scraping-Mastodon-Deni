@@ -36,13 +36,13 @@ Il explore les dynamiques des expressions liées au déni à partir de :
 
 ## Structure du dépôt
 
-* `Deni.R` — script de collecte et d’analyse des données ;
-* `Deni.Rmd` — document de recherche reproductible ;
-* `Deni.html` — rapport d’analyse généré.
+* `deni.R` — script de collecte et d’analyse des données ;
+* `deni.Rmd` — document de recherche reproductible ;
+* `deni.html` — rapport d’analyse généré.
 
-Le fichier `Deni.html` suffit pour consulter le travail et visualiser les résultats sans avoir à exécuter le code.
+Le fichier `deni.html` suffit pour consulter le travail et visualiser les résultats sans avoir à exécuter le code.
 
 ## Auteur
 
 Gabriel Gallier
-ENS Paris-Saclay — Master de sociologie quantitative et démographie
+ENS Paris-Saclay - Normalien à l'ENS Paris-Saclay
