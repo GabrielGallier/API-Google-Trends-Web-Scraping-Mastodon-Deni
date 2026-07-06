@@ -28,7 +28,7 @@ Il explore les dynamiques des expressions liées au déni à partir de :
 
 ### Intensité moyenne annuelle de « déni » - Introduction en page 20 de l'ouvrage
 
-![Google Trends]()
+![Google Trends](Graph.png)
 
 ### Distribution géographique des recherches liées au déni
 
