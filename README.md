@@ -45,4 +45,4 @@ Le fichier `deni.html` suffit pour consulter le travail et visualiser les résul
 ## Auteur
 
 Gabriel Gallier
-ENS Paris-Saclay - Normalien à l'ENS Paris-Saclay
+- Normalien à l'ENS Paris-Saclay
