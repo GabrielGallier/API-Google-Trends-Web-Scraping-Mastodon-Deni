@@ -1,0 +1,23 @@
+# R history and session files
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+
+# RStudio
+.Rproj.user/
+
+# R Markdown / knitr cache
+*_cache/
+*_files/
+*.utf8.md
+*.knit.md
+
+# Test files
+test.html
+test.Rmd
+Knit-*.html
+
+# OS files
+.DS_Store
+Thumbs.db
