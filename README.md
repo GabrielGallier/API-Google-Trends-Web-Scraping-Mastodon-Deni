@@ -1,46 +1,48 @@
-# Denial Discourse in French Digital Space
+# Le discours du déni dans l’espace numérique français
 
-Exploratory computational sociology project analysing the emergence and diffusion of denial-related discourse in France.
+Projet exploratoire de sociologie computationnelle analysant l’émergence et la diffusion du discours lié au déni en France.
 
-## Research context
+## Contexte de recherche
 
-This project was developed as a first research contribution to Marc Joly's upcoming book on denial in French public discourse.
+Ce projet a été développé comme une première contribution de recherche au prochain ouvrage de Marc Joly consacré au déni dans le discours public français.
 
-It explores the dynamics of denial-related expressions through:
+Il explore les dynamiques des expressions liées au déni à partir de :
 
-- Google Trends time-series data
-- exploratory scraping of Mastodon posts
+* Données de séries temporelles issues de Google Trends ;
+* Scraping exploratoire de publications Mastodon.
 
-## Research questions
+## Questions de recherche
 
-- How does the use of the term "déni" evolve in French digital discourse?
-- Are certain expressions (e.g. "déni de démocratie", "déni de justice") associated with specific political events?
-- Can digital traces provide insights into emerging discursive strategies of denial?
+* Comment l’usage du terme « déni » évolue-t-il dans le discours numérique français ?
+* Certaines expressions, comme « déni de démocratie » ou « déni de justice », sont-elles associées à des événements politiques spécifiques ?
+* Les traces numériques peuvent-elles éclairer l’émergence de stratégies discursives liées au déni ?
 
-## Methods
+## Méthodes
 
-- Google Trends API (`gtrendsR`)
-- time-series visualization
-- exploratory Mastodon scraping
-- R and R Markdown workflow
+* API Google Trends (`gtrendsR`) ;
+* visualisation de séries temporelles ;
+* scraping exploratoire de Mastodon ;
+* workflow reproductible avec R et R Markdown.
 
-## Example results
+## Exemples de résultats
 
-### Google Trends evolution of denial discourse in France
+### Intensité moyenne annuelle de « déni » - Introduction en page 20 de l'ouvrage
 
 ![Google Trends](Graph.png)
 
-### Geographic distribution of denial-related searches
+### Distribution géographique des recherches liées au déni
 
-![France Map](Map.png)
+![Carte de France](Map.png)
 
-## Repository structure
+## Structure du dépôt
 
-- `Deni.R` — data collection and analysis script
-- `Deni.Rmd` — reproducible research document
-- `Deni.html` — rendered analysis report
+* `Deni.R` — script de collecte et d’analyse des données ;
+* `Deni.Rmd` — document de recherche reproductible ;
+* `Deni.html` — rapport d’analyse généré.
 
-## Author
+Le fichier `Deni.html` suffit pour consulter le travail et visualiser les résultats sans avoir à exécuter le code.
 
-Gabriel Gallier  
-ENS Paris-Saclay — Master in Quantitative Sociology and Demography
+## Auteur
+
+Gabriel Gallier
+ENS Paris-Saclay — Master de sociologie quantitative et démographie
